@@ -297,14 +297,15 @@ input:focus, select:focus { border-color: var(--cyan); }
   border: 1px solid var(--gray2);
   -webkit-overflow-scrolling: touch;
 }
-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
 thead th {
   background: var(--navy);
   color: white;
   padding: 9px 10px;
   text-align: center;
-  font-family: 'Space Mono', monospace;
-  font-size: .65rem;
+  font-family: 'DM Sans', sans-serif;
+  font-size: .75rem;
+  font-weight: 600;
   white-space: nowrap;
   position: sticky;
   top: 0;
@@ -314,19 +315,20 @@ thead th:nth-child(2) { min-width: 70px; }
 tbody tr:nth-child(even) { background: #F8FAFC; }
 tbody tr { border-bottom: 1px solid var(--gray2); }
 tbody tr:last-child { border-bottom: none; }
-td { padding: 8px 10px; text-align: center; }
+td { padding: 9px 10px; text-align: center; }
 td:first-child { text-align: left; font-weight: 600; font-size: .8rem; }
 td:nth-child(2) { color: var(--gray); font-size: .72rem; }
 .t-best {
-  font-family: 'Space Mono', monospace;
+  font-family: 'DM Sans', sans-serif;
   font-weight: 700;
-  color: var(--green);
-  background: #ECFDF5;
+  color: #047857;
+  background: #D1FAE5;
   border-radius: 5px;
-  padding: 2px 6px;
+  padding: 3px 8px;
   display: inline-block;
+  font-size: .85rem;
 }
-.t-time { font-family: 'Space Mono', monospace; }
+.t-time { font-family: 'DM Sans', sans-serif; font-weight: 500; }
 .t-dash { color: var(--gray2); font-size: 1rem; }
 
 /* ── Carte nageur individuel ────────────────────────────────────────── */
@@ -1002,7 +1004,7 @@ function exportHTML() {
         if (!t) return '<td style="color:#E2E8F0">—</td>';
         const isBest = valid.length>1&&Math.abs(toSec(t)-bestSec)<0.001;
         return isBest
-          ? `<td style="font-family:monospace;font-weight:700;color:#10B981;background:#ECFDF5;border-radius:4px;padding:2px 4px">${t}</td>`
+          ? `<td style="font-family:sans-serif;font-weight:700;color:#047857;background:#D1FAE5;border-radius:4px;padding:3px 8px">${t}</td>`
           : `<td style="font-family:monospace">${t}</td>`;
       }).join('')}
     </tr>`;
