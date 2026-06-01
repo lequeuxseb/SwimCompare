@@ -571,7 +571,7 @@ const S = {
   results:  [],   // [{ nom, annee, perfs:[...] }]
 };
 
-const FFN = 'https://ffn.extranat.fr/webffn/';
+const PROXY = 'https://ffn-proxy.onrender.com';
 
 // ── Navigation ───────────────────────────────────────────────────────────────
 function goTo(n) {
@@ -623,9 +623,9 @@ async function doSearch() {
 
   try {
     // Appel direct FFN AJAX depuis le navigateur du téléphone
-    const url = FFN + '_recherche.php?go=ind&idrch=' + encodeURIComponent(q);
+    const url = PROXY + '/proxy/search?q=' + encodeURIComponent(q);
     const resp = await fetch(url, {
-      headers: { 'X-Requested-With': 'XMLHttpRequest' }
+      // pas de headers spéciaux nécessaires pour le proxy
     });
     if (!resp.ok) throw new Error('FFN inaccessible (' + resp.status + ')');
     const data = await resp.json();
@@ -755,8 +755,7 @@ async function runAnalyse() {
     for (const sw of S.swimmers) {
       let perfs = [];
       for (const b of bassins) {
-        const url = FFN + 'nat_recherche.php?idrch_id=' + sw.id +
-                    '&idbas=' + b + '&idopt=prf';
+        const url = PROXY + '/proxy/perfs?id=' + sw.id + '&bas=' + b;
         try {
           const resp = await fetch(url);
           if (resp.ok) {
