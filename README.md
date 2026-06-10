@@ -1,2 +1,2 @@
-# ffn-scraper
+# SwimTrack
 FFN Swimming Performance Analyzer
