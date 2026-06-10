@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: swimtrack
+    name: swimcompare
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
