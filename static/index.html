@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0A2463">
-<title>FFN — Comparaison nageurs</title>
+<title>SwimTrack — Comparaison nageurs</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
 <style>
@@ -415,8 +415,8 @@ td:nth-child(2) { color: var(--gray); font-size: .72rem; }
 <!-- ── Header ────────────────────────────────────────────────────────── -->
 <div class="header">
   <div class="header-inner">
-    <div class="logo">🏊 <span>FFN</span>Analyse
-      <small>Comparaison de performances</small>
+    <div class="logo">🏊 <span>Swim</span>Track
+      <small>Comparaison de performances natation</small>
     </div>
   </div>
   <div class="steps" id="steps">
@@ -555,6 +555,11 @@ td:nth-child(2) { color: var(--gray); font-size: .72rem; }
 
 </div><!-- /screen-3 -->
 
+
+<div style="text-align:center;padding:16px;font-size:.7rem;color:var(--gray);border-top:1px solid var(--gray2);margin-top:12px">
+  Données issues de <a href="https://ffn.extranat.fr" target="_blank" style="color:var(--cyan)">extranat.fr</a> — Fédération Française de Natation<br>
+  SwimTrack n'est pas affilié à la FFN
+</div>
 </main>
 
 <div id="toast"></div>
@@ -573,7 +578,7 @@ const S = {
   results:  [],   // [{ nom, annee, perfs:[...] }]
 };
 
-const PROXY = 'https://ffn-proxy.onrender.com';
+const PROXY = 'https://swimtrack.onrender.com';
 
 // ── Navigation ───────────────────────────────────────────────────────────────
 function goTo(n) {
@@ -1075,7 +1080,7 @@ ${indivHTML}
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = `ffn_comparaison_${S.age}ans_${new Date().toISOString().slice(0,10)}.html`;
+  a.download = `swimtrack_${S.age}ans_${new Date().toISOString().slice(0,10)}.html`;
   a.click();
   toast('Fichier HTML téléchargé ✓', 'ok');
 }
@@ -1093,7 +1098,7 @@ function exportCSV() {
   const blob = new Blob(['\uFEFF'+csv], { type: 'text/csv;charset=utf-8' });
   const a    = document.createElement('a');
   a.href     = URL.createObjectURL(blob);
-  a.download = `ffn_${S.age}ans.csv`;
+  a.download = `swimtrack_${S.age}ans.csv`;
   a.click();
   toast('CSV téléchargé ✓', 'ok');
 }
