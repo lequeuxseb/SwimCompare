@@ -1,2 +1,2 @@
-# SwimTrack
+# SwimCompare
 FFN Swimming Performance Analyzer
