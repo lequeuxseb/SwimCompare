@@ -467,6 +467,18 @@ td:nth-child(2) { color: var(--gray); font-size: .72rem; }
     </div>
   </div>
 
+
+  <!-- Favoris -->
+  <div class="card fav-section" id="fav-card">
+    <div class="card-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>⭐ Favoris</span>
+      <span id="fav-count" style="font-family:'Space Mono',monospace;color:var(--amber);font-size:.8rem">0</span>
+    </div>
+    <div id="fav-list">
+      <div class="fav-empty">Ajoutez des nageurs aux favoris avec ⭐</div>
+    </div>
+  </div>
+
   <!-- Liste des nageurs sélectionnés -->
   <div class="card">
     <div class="card-label" style="display:flex;justify-content:space-between">
@@ -715,6 +727,7 @@ function renderChips() {
         <div class="chip-name">${s.nom}</div>
         <div class="chip-meta">${s.annee || '?'} · ${s.sexe === 'F' ? 'Féminin' : 'Masculin'} · ID ${s.id}</div>
       </div>
+      <button class="fav-btn" onclick="toggleFav(${i})" title="Ajouter aux favoris">${isFav(s.id) ? '⭐' : '☆'}</button>
       <button class="chip-del" onclick="removeSwimmer(${i})" aria-label="Retirer">✕</button>
     </div>`).join('');
 }
@@ -1102,6 +1115,72 @@ function exportCSV() {
   a.click();
   toast('CSV téléchargé ✓', 'ok');
 }
+
+
+// ── Favoris (localStorage) ────────────────────────────────────────────────────
+function getFavs() {
+  try { return JSON.parse(localStorage.getItem('swimcompare_favs') || '[]'); }
+  catch(e) { return []; }
+}
+function saveFavs(favs) {
+  try { localStorage.setItem('swimcompare_favs', JSON.stringify(favs)); }
+  catch(e) {}
+}
+function isFav(id) {
+  return getFavs().some(f => f.id === id);
+}
+function toggleFav(idx) {
+  const sw = S.swimmers[idx];
+  if (!sw) return;
+  let favs = getFavs();
+  if (isFav(sw.id)) {
+    favs = favs.filter(f => f.id !== sw.id);
+    toast(sw.nom + ' retiré des favoris', '');
+  } else {
+    favs.push(sw);
+    toast('⭐ ' + sw.nom + ' ajouté aux favoris', 'ok');
+  }
+  saveFavs(favs);
+  renderChips();
+  renderFavs();
+}
+function removeFav(id) {
+  const favs = getFavs().filter(f => f.id !== id);
+  saveFavs(favs);
+  renderFavs();
+  renderChips();
+  toast('Retiré des favoris', '');
+}
+function addFavToList(fav) {
+  if (S.swimmers.find(s => s.id === fav.id)) {
+    toast('Déjà dans la liste', 'err'); return;
+  }
+  S.swimmers.push(fav);
+  renderChips();
+  toast(fav.nom + ' ajouté ✓', 'ok');
+}
+function renderFavs() {
+  const favs    = getFavs();
+  const list    = document.getElementById('fav-list');
+  const counter = document.getElementById('fav-count');
+  counter.textContent = favs.length;
+
+  if (!favs.length) {
+    list.innerHTML = '<div class="fav-empty">Ajoutez des nageurs aux favoris avec ⭐</div>';
+    return;
+  }
+  list.innerHTML = favs.map(f => `
+    <div class="fav-chip" onclick="addFavToList(${JSON.stringify(f).replace(/"/g, '&quot;')})">
+      <div class="avatar ${f.sexe === 'F' ? 'f' : ''}" style="width:30px;height:30px;font-size:.6rem">${initials(f.nom)}</div>
+      <div style="flex:1">
+        <div class="fav-name">${f.nom}</div>
+        <div class="fav-meta">${f.annee || '?'} · ${f.sexe === 'F' ? 'F' : 'M'} · ID ${f.id}</div>
+      </div>
+      <button class="fav-del" onclick="event.stopPropagation();removeFav('${f.id}')" title="Retirer">✕</button>
+    </div>`).join('');
+}
+// Charger les favoris au démarrage
+document.addEventListener('DOMContentLoaded', renderFavs);
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 let toastTimer = null;
