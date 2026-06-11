@@ -2,10 +2,11 @@
 Proxy FFN — relaie les requêtes vers ffn.extranat.fr
 et ajoute les headers CORS pour autoriser l'app mobile.
 """
-from flask import Flask, request, Response, send_from_directory
+from flask import Flask, request, Response, send_file
 import requests as req
+import os
 
-app = Flask(__name__, static_folder='static')
+app = Flask(__name__)
 
 FFN = 'https://ffn.extranat.fr/webffn/'
 
@@ -32,7 +33,7 @@ def add_cors(response):
     return cors(response)
 
 
-@app.route('/options', methods=['OPTIONS'])
+@app.route('/', methods=['OPTIONS'])
 @app.route('/<path:p>', methods=['OPTIONS'])
 def handle_options(p=''):
     return cors(Response('', 204))
@@ -40,7 +41,6 @@ def handle_options(p=''):
 
 @app.route('/proxy/search')
 def proxy_search():
-    """Recherche nageur via l'API AJAX FFN."""
     q = request.args.get('q', '')
     try:
         r = req.get(
@@ -59,7 +59,6 @@ def proxy_search():
 
 @app.route('/proxy/perfs')
 def proxy_perfs():
-    """Récupère la page HTML des performances d'un nageur."""
     idrch_id = request.args.get('id', '')
     idbas    = request.args.get('bas', '25')
     try:
@@ -76,9 +75,40 @@ def proxy_perfs():
                         status=500, content_type='text/html')
 
 
+@app.route('/proxy/rankings')
+def proxy_rankings():
+    """Récupère le 16ème temps national pour une épreuve/age/bassin/sexe."""
+    idepr = request.args.get('idepr', '')
+    idage = request.args.get('idage', '12')
+    idbas = request.args.get('idbas', '25')
+    idgen = request.args.get('idgen', 'M')
+    try:
+        r = req.get(
+            FFN + 'nat_rankings.php',
+            params={
+                'idact': 'nat',
+                'idbas': idbas,
+                'idepr': idepr,
+                'idage': idage,
+                'idgen': idgen,
+            },
+            headers={**HEADERS, 'Accept': 'text/html'},
+            timeout=15
+        )
+        return Response(r.content, status=r.status_code,
+                        content_type='text/html; charset=utf-8')
+    except Exception as e:
+        return Response(f'<html><body>Erreur: {e}</body></html>',
+                        status=500, content_type='text/html')
+
+
 @app.route('/')
 def index():
-    return send_from_directory('static', 'index.html')
+    # Cherche index.html à la racine OU dans static/
+    for path in ['static/index.html', 'index.html']:
+        if os.path.exists(path):
+            return send_file(path)
+    return 'index.html introuvable', 404
 
 
 if __name__ == '__main__':
