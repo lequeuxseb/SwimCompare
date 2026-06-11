@@ -867,6 +867,67 @@ function bestPerEvent(perfs) {
   return Object.values(best).sort((a,b) => a.epreuve.localeCompare(b.epreuve));
 }
 
+
+// ── Mapping épreuve → code FFN pour rankings ─────────────────────────────────
+const EPREUVE_CODE = {
+  '50 NL':    '51', '100 NL':  '52', '200 NL':  '53', '400 NL':  '54',
+  '800 NL':   '55', '1500 NL': '56',
+  '50 Dos':   '61', '100 Dos': '62',
+  '50 Bra.':  '71', '100 Bra.':'72',
+  '50 Pap.':  '81', '100 Pap.':'82',
+  '100 4 N.': '90', '200 4 N.':'91',
+};
+
+// ── Récupération du 16ème temps national ─────────────────────────────────────
+async function get16eme(idepr, age, bassin, sexe) {
+  try {
+    const url = PROXY + '/proxy/rankings?idepr=' + idepr +
+                '&idage=' + age + '&idbas=' + bassin +
+                '&idgen=' + (sexe === 'F' ? 'F' : 'M');
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    // Les rankings FFN : tableau avec rang, nom, temps...
+    // Le 16ème temps est à la 16ème ligne de données
+    const rows = Array.from(doc.querySelectorAll('tbody tr, table tr'))
+      .filter(r => {
+        const cells = r.querySelectorAll('td');
+        if (cells.length < 3) return false;
+        // Chercher une ligne qui contient un temps
+        const txt = Array.from(cells).map(c => c.textContent.trim()).join(' ');
+        return /\d{2}[.,:]\d{2}/.test(txt);
+      });
+    if (rows.length < 16) return null;
+    // Extraire le temps de la 16ème ligne
+    const cells16 = rows[15].querySelectorAll('td');
+    for (const cell of cells16) {
+      const t = cell.textContent.trim();
+      if (/^\d{1,2}:\d{2}[.,]\d{2}$/.test(t) || /^\d{2}[.,]\d{2}$/.test(t)) {
+        return t.replace(',', '.');
+      }
+    }
+    return null;
+  } catch(e) {
+    return null;
+  }
+}
+
+// ── Cache des 16èmes temps ────────────────────────────────────────────────────
+const CACHE_16 = {};
+
+async function get16emeCached(epreuve, bassin, age, sexe) {
+  const bassinCode = bassin.includes('25') ? '25' : '50';
+  const idepr = EPREUVE_CODE[epreuve];
+  if (!idepr) return null;
+  const key = idepr + '_' + age + '_' + bassinCode + '_' + sexe;
+  if (key in CACHE_16) return CACHE_16[key];
+  const t = await get16eme(idepr, age, bassinCode, sexe);
+  CACHE_16[key] = t;
+  return t;
+}
+
 function renderResults() {
   const tabs    = document.getElementById('res-tabs');
   const content = document.getElementById('res-content');
@@ -922,6 +983,40 @@ function renderResults() {
       </table>
     </div>`;
   content.appendChild(cmpPanel);
+
+  // ── Onglet Progression ──
+  addTab('📈 Progression', 'panel-progression', false);
+  const progPanel = document.createElement('div');
+  progPanel.className = 'res-panel';
+  progPanel.id = 'panel-progression';
+  progPanel.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px">
+      <div>
+        <div style="font-size:.72rem;color:var(--gray);margin-bottom:4px">Épreuve</div>
+        <select id="prog-epreuve" style="font-size:.82rem" onchange="updateProgChart()">
+          ${[...new Set(allPerfs.map(p => p.epreuve))].sort()
+            .map(ep => `<option value="${ep}">${ep}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div style="font-size:.72rem;color:var(--gray);margin-bottom:4px">Bassin</div>
+        <select id="prog-bassin" style="font-size:.82rem" onchange="updateProgChart()">
+          ${[...new Set(allPerfs.map(p => p.bassin))].sort()
+            .map(b => `<option value="${b}">${b}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px" id="prog-legend"></div>
+    <div style="position:relative;width:100%;height:280px">
+      <canvas id="chart-prog" role="img" aria-label="Courbe de progression des nageurs">
+        Courbe de progression par nageur
+      </canvas>
+    </div>
+    <div id="prog-stats" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-top:12px"></div>
+    <p style="font-size:.7rem;color:var(--gray);margin-top:10px;text-align:center">
+      ---- 16ème temps national à cet âge (référence FFN)
+    </p>`;
+  content.appendChild(progPanel);
 
   // ── Un onglet par nageur ──
   S.results.forEach((r, idx) => {
@@ -991,8 +1086,194 @@ function addTab(label, panelId, active) {
     document.querySelectorAll('.res-panel').forEach(x => x.classList.remove('on'));
     t.classList.add('on');
     document.getElementById(panelId).classList.add('on');
+    if (panelId === 'panel-progression') initProgChart();
   });
   tabs.appendChild(t);
+}
+
+
+// ── Courbe de progression ─────────────────────────────────────────────────────
+const PROG_COLORS = ['#185FA5','#10B981','#EF9F27','#A32D2D','#7F77DD','#D85A30'];
+let progChart = null;
+
+function secToStr(s) {
+  if (!s || s === 99999) return '—';
+  s = parseFloat(s);
+  const m = Math.floor(s / 60);
+  const sec = (s % 60).toFixed(2).padStart(5,'0');
+  return m > 0 ? m + ':' + sec : sec;
+}
+
+async function updateProgChart() {
+  const epSel  = document.getElementById('prog-epreuve');
+  const basSel = document.getElementById('prog-bassin');
+  if (!epSel || !basSel) return;
+
+  const ep  = epSel.value;
+  const bas = basSel.value;
+
+  // Construire les données par nageur : age → meilleur temps
+  const nageurs = S.results.map(r => r.nom);
+  const sexe    = S.results[0] ? (S.results[0].sexe || 'M') : 'M';
+
+  // Collecter tous les âges disponibles pour cette épreuve
+  const agesSet = new Set();
+  S.results.forEach(r => {
+    r.perfs.filter(p => p.epreuve === ep && p.bassin === bas)
+            .forEach(p => { if (p.age) agesSet.add(parseInt(p.age)); });
+  });
+  // Étendre ±2 ans autour de l'âge analysé
+  const ageAnalyse = S.age;
+  for (let a = ageAnalyse - 3; a <= ageAnalyse + 3; a++) {
+    if (a >= 6 && a <= 20) agesSet.add(a);
+  }
+  const ages = [...agesSet].sort((a,b) => a-b);
+
+  // Pour chaque nageur : meilleur temps par âge
+  const datasets = S.results.map((r, i) => {
+    const data = ages.map(age => {
+      const perfs = r.perfs.filter(p =>
+        p.epreuve === ep && p.bassin === bas && parseInt(p.age) === age);
+      if (!perfs.length) return null;
+      const best = Math.min(...perfs.map(p => toSec(p.temps)));
+      return best < 9999 ? best : null;
+    });
+    return {
+      label: r.nom,
+      data,
+      borderColor: PROG_COLORS[i % PROG_COLORS.length],
+      backgroundColor: PROG_COLORS[i % PROG_COLORS.length],
+      borderWidth: 2.5,
+      pointRadius: data.map(v => v ? 5 : 0),
+      pointHoverRadius: 7,
+      tension: 0.35,
+      spanGaps: false,
+    };
+  });
+
+  // Récupérer le 16ème temps national (async)
+  const bassinCode = bas.includes('25') ? '25' : '50';
+  const ref16 = await get16emeCached(ep, bas, ageAnalyse, sexe);
+  const ref16sec = ref16 ? toSec(ref16) : null;
+
+  // Dataset référence 16ème national (ligne horizontale à l'âge analysé)
+  const ref16Data = ages.map(age => age === ageAnalyse && ref16sec ? ref16sec : null);
+  if (ref16sec) {
+    datasets.push({
+      label: '16ème national (' + ageAnalyse + ' ans)',
+      data: ref16Data,
+      borderColor: '#A32D2D',
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderDash: [6, 4],
+      pointRadius: ages.map(age => age === ageAnalyse ? 6 : 0),
+      pointStyle: 'triangle',
+      tension: 0,
+      spanGaps: false,
+    });
+  }
+
+  // Calculer les min/max pour l'axe Y
+  const allVals = datasets.flatMap(d => d.data).filter(Boolean);
+  if (!allVals.length) return;
+  const minV = Math.min(...allVals) * 0.97;
+  const maxV = Math.max(...allVals) * 1.03;
+
+  if (progChart) progChart.destroy();
+
+  progChart = new Chart(document.getElementById('chart-prog'), {
+    type: 'line',
+    data: { labels: ages.map(a => a + ' ans'), datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              if (!v) return null;
+              return ' ' + ctx.dataset.label + ' : ' + secToStr(v);
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(128,128,128,.1)' },
+          ticks: { font: { size: 11 }, autoSkip: false }
+        },
+        y: {
+          reverse: true,
+          min: minV,
+          max: maxV,
+          grid: { color: 'rgba(128,128,128,.1)' },
+          ticks: { font: { size: 11 }, callback: v => secToStr(v) },
+          title: {
+            display: true,
+            text: 'Temps (plus bas = meilleur)',
+            font: { size: 10 },
+            color: '#888'
+          }
+        }
+      }
+    }
+  });
+
+  // Légende
+  const legend = document.getElementById('prog-legend');
+  if (legend) {
+    legend.innerHTML = datasets.map(d => `
+      <span style="display:flex;align-items:center;gap:6px;font-size:.75rem;color:var(--color-text-secondary)">
+        <span style="width:20px;height:3px;background:${d.borderColor};border-radius:2px;display:inline-block;
+          ${d.borderDash ? 'border-top:2px dashed '+d.borderColor+';background:transparent;height:0' : ''}">
+        </span>${d.label}
+      </span>`).join('');
+  }
+
+  // Stats par nageur
+  const statsEl = document.getElementById('prog-stats');
+  if (statsEl) {
+    statsEl.innerHTML = S.results.map((r, i) => {
+      const perfsEp = r.perfs.filter(p => p.epreuve === ep && p.bassin === bas);
+      const best = perfsEp.length ? Math.min(...perfsEp.map(p => toSec(p.temps))) : null;
+      const atAge = perfsEp.filter(p => parseInt(p.age) === ageAnalyse);
+      const bestAtAge = atAge.length ? Math.min(...atAge.map(p => toSec(p.temps))) : null;
+      const vs16 = (bestAtAge && ref16sec)
+        ? ((bestAtAge - ref16sec) / ref16sec * 100).toFixed(1)
+        : null;
+      return `<div style="background:var(--color-background-secondary);border-radius:var(--border-radius-md);
+        padding:.75rem;border-left:3px solid ${PROG_COLORS[i % PROG_COLORS.length]}">
+        <p style="font-size:.7rem;color:var(--color-text-secondary);margin:0 0 4px">${r.nom.split(' ').pop()}</p>
+        <p style="font-size:1rem;font-weight:500;margin:0 0 3px;color:var(--color-text-primary)">
+          ${bestAtAge ? secToStr(bestAtAge) : '—'}
+        </p>
+        <p style="font-size:.7rem;margin:0;color:${vs16 && parseFloat(vs16) <= 0 ? '#10B981' : 'var(--color-text-secondary)'}">
+          ${vs16 !== null
+            ? (parseFloat(vs16) <= 0
+               ? '▼ ' + Math.abs(vs16) + '% sous le 16ème'
+               : '▲ ' + vs16 + '% au-dessus du 16ème')
+            : ref16 ? 'pas de temps à ' + ageAnalyse + ' ans' : 'référence indisponible'}
+        </p>
+      </div>`;
+    }).join('');
+  }
+}
+
+// Initialiser la courbe quand l'onglet Progression est cliqué
+function initProgChart() {
+  if (!document.getElementById('chart-prog')) return;
+  // Charger Chart.js si pas déjà chargé
+  if (typeof Chart === 'undefined') {
+    const s = document.createElement('script');
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js';
+    s.onload = () => updateProgChart();
+    document.head.appendChild(s);
+  } else {
+    updateProgChart();
+  }
 }
 
 // ── Export HTML ──────────────────────────────────────────────────────────────
