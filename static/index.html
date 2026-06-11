@@ -873,7 +873,7 @@ function renderResults() {
   tabs.innerHTML = content.innerHTML = '';
 
   // ── Onglet Comparaison ──
-  addTab('Comparaison', 'cmp', true);
+  addTab('Comparaison', 'panel-cmp', true);
   const allPerfs  = S.results.flatMap(r => r.perfs);
   const nageurs   = S.results.map(r => r.nom);
   const epreuves  = [...new Set(allPerfs.map(p => p.epreuve + '||' + p.bassin))]
