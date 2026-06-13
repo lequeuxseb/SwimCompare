@@ -77,22 +77,47 @@ def proxy_perfs():
 
 @app.route('/proxy/rankings')
 def proxy_rankings():
-    """Récupère le 16ème temps national pour une épreuve/age/bassin/sexe."""
+    """Récupère le 16ème temps national via POST sur nat_rankings.php.
+    Paramètres FFN découverts : go=epr, idsai=saison, idbas, idepr, idmin=age, idmax=age, idsex
+    """
     idepr = request.args.get('idepr', '')
     idage = request.args.get('idage', '12')
     idbas = request.args.get('idbas', '25')
     idgen = request.args.get('idgen', 'M')
+    # Saison courante : si age=12 en 2026, saison = 2025-2026
+    from datetime import datetime
+    year = datetime.now().year
+    month = datetime.now().month
+    # Saison FFN : septembre à août
+    if month >= 9:
+        saison = f"{year}-{year+1}"
+    else:
+        saison = f"{year-1}-{year}"
     try:
-        r = req.get(
+        # POST avec les bons paramètres du formulaire FFN
+        data = {
+            'idact': 'nat',
+            'go':    'epr',
+            'idsai': saison,
+            'idbas': idbas,
+            'idepr': idepr,
+            'idmin': idage,
+            'idmax': idage,
+            'idsex': idgen,
+            'idopt': '',
+            'idcat': '',
+            'idreg': '',
+            'iddep': '',
+            'idzon': '',
+            'idold': '',
+            'idcot': '',
+            'idclb': '',
+        }
+        r = req.post(
             FFN + 'nat_rankings.php',
-            params={
-                'idact': 'nat',
-                'idbas': idbas,
-                'idepr': idepr,
-                'idage': idage,
-                'idgen': idgen,
-            },
-            headers={**HEADERS, 'Accept': 'text/html'},
+            data=data,
+            headers={**HEADERS, 'Accept': 'text/html',
+                     'Content-Type': 'application/x-www-form-urlencoded'},
             timeout=15
         )
         return Response(r.content, status=r.status_code,
