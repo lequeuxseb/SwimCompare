@@ -874,105 +874,56 @@ function bestPerEvent(perfs) {
 }
 
 
-// ── Mapping épreuve → code FFN pour rankings ─────────────────────────────────
-const EPREUVE_CODE = {
-  '50 NL':    '51', '100 NL':  '52', '200 NL':  '53', '400 NL':  '54',
-  '800 NL':   '55', '1500 NL': '56',
-  '50 Dos':   '61', '100 Dos': '62',
-  '50 Bra.':  '71', '100 Bra.':'72',
-  '50 Pap.':  '81', '100 Pap.':'82',
-  '100 4 N.': '90', '200 4 N.':'91',
+// ── 16ème temps national — vue "Statistiques des rankings" (FFN) ──────────────
+// Le proxy renvoie désormais du JSON : toutes les épreuves d'un (âge, sexe, bassin),
+// avec le 16e temps déjà calculé (champ t16_norm). On met en cache la réponse
+// complète par (âge, bassin, sexe) : un seul appel couvre toutes les épreuves.
+// NB : cette table FFN ne couvre que 12 à 18 ans ; en dessous, pas de référence.
+
+// Libellé SwimCompare ("100 NL", "50 Bra.", "100 4 N.") -> libellé FFN ("100 Nage Libre"…)
+const STROKE_FFN = {
+  'NL': 'Nage Libre', 'Dos': 'Dos', 'Bra.': 'Brasse',
+  'Pap.': 'Papillon', '4 N.': '4 Nages',
 };
+function ffnEpreuveName(label) {
+  const m = (label || '').match(/^(\d+)\s+(.+)$/);
+  if (!m) return null;
+  const stroke = STROKE_FFN[m[2].trim()];
+  return stroke ? (m[1] + ' ' + stroke) : null;
+}
+function normEp(s) { return (s || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
 
-// ── Récupération du 16ème temps national ─────────────────────────────────────
-async function get16eme(idepr, age, bassin, sexe) {
+// Cache de la réponse rankings par (âge, bassin, sexe)
+const CACHE_RANK = {};
+async function getRankings(age, bassinCode, sexe) {
+  const key = age + '_' + bassinCode + '_' + sexe;
+  if (key in CACHE_RANK) return CACHE_RANK[key];
   try {
-    const url = PROXY + '/proxy/rankings?idepr=' + idepr +
-                '&idage=' + age + '&idbas=' + bassin +
-                '&idgen=' + (sexe === 'F' ? 'F' : 'M');
+    const url = PROXY + '/proxy/rankings?age=' + age +
+                '&bas=' + bassinCode + '&sexe=' + sexe;
     const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const html = await resp.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-
-    // Regex pour détecter un temps de natation
-    const timeRe = /^\d{1,2}:\d{2}[.,]\d{2}$|^\d{2}[.,]\d{2}$/;
-
-    // Collecter tous les temps dans l'ordre d'apparition dans le tableau
-    const allTimes = [];
-
-    // Chercher dans toutes les cellules td du document
-    doc.querySelectorAll('td').forEach(cell => {
-      const t = cell.textContent.trim();
-      if (timeRe.test(t)) {
-        allTimes.push(t.replace(',', '.'));
-      }
-    });
-
-    // Si pas de td, chercher dans les div/span avec classe contenant time/temps
-    if (!allTimes.length) {
-      doc.querySelectorAll('[class*="time"],[class*="temps"],[class*="chrono"]').forEach(el => {
-        const t = el.textContent.trim();
-        if (timeRe.test(t)) allTimes.push(t.replace(',', '.'));
-      });
-    }
-
-    // Chercher aussi dans tout le texte brut par regex
-    if (!allTimes.length) {
-      const bodyText = doc.body ? doc.body.innerHTML : html;
-      const matches = bodyText.match(/\d{1,2}:\d{2}[.,]\d{2}|(?<![\d:])\d{2}[.,]\d{2}(?!\d)/g);
-      if (matches) allTimes.push(...matches.map(t => t.replace(',','.')));
-    }
-
-    console.log('[Rankings] ' + allTimes.length + ' temps trouvés pour idepr=' + idepr + ' age=' + age);
-
-    // Filtrer les temps selon la durée cohérente avec l'épreuve
-    // idepr: 51=50NL, 52=100NL, 53=200NL, 54=400NL, 55=800NL, 56=1500NL
-    //        61=50Dos, 62=100Dos, 71=50Bra, 72=100Bra, 81=50Pap, 82=100Pap
-    //        90=100QN, 91=200QN
-    function timeInRange(t, idepr) {
-      const s = parseFloat(t.includes(':') ?
-        t.split(':').reduce((a,v,i) => a + parseFloat(v)*Math.pow(60,1-i), 0) :
-        t);
-      const ranges = {
-        '51':[20,80],'61':[25,90],'71':[25,100],'81':[20,80],   // 50m
-        '52':[45,160],'62':[55,200],'72':[55,220],'82':[45,180], // 100m
-        '90':[55,200],                                            // 100QN
-        '53':[100,350],'63':[120,400],'73':[120,420],'83':[100,350], // 200m
-        '91':[120,420],                                           // 200QN
-        '54':[220,700],                                           // 400m
-        '55':[480,1400],                                          // 800m
-        '56':[900,2500],                                          // 1500m
-      };
-      const r = ranges[idepr] || [10, 3000];
-      return s >= r[0] && s <= r[1];
-    }
-
-    const validTimes = allTimes.filter(t => timeInRange(t, idepr));
-    console.log('[Rankings] ' + validTimes.length + ' temps valides (filtrés)');
-
-    if (validTimes.length >= 16) return validTimes[15];
-    if (validTimes.length > 0)   return validTimes[validTimes.length - 1];
-    return null;
-  } catch(e) {
+    if (!resp.ok) { CACHE_RANK[key] = null; return null; }
+    const json = await resp.json();
+    CACHE_RANK[key] = (json && json.epreuves) ? json.epreuves : null;
+    return CACHE_RANK[key];
+  } catch (e) {
     console.error('[Rankings] Erreur:', e);
+    CACHE_RANK[key] = null;
     return null;
   }
 }
 
-// ── Cache des 16èmes temps ────────────────────────────────────────────────────
-const CACHE_16 = {};
-
+// Renvoie le 16e temps national (ex "1:07.32" ou "30.68") ou null.
 async function get16emeCached(epreuve, bassin, age, sexe) {
   const bassinCode = bassin.includes('25') ? '25' : '50';
-  const idepr = EPREUVE_CODE[epreuve];
-  if (!idepr) return null;
-  const key = idepr + '_' + age + '_' + bassinCode + '_' + sexe;
-  if (key in CACHE_16) return CACHE_16[key];
-  const t = await get16eme(idepr, age, bassinCode, sexe);
-  CACHE_16[key] = t;
-  return t;
+  const ffnName = ffnEpreuveName(epreuve);
+  if (!ffnName) { console.log('[Rankings] épreuve non mappée: ' + epreuve); return null; }
+  const epreuves = await getRankings(age, bassinCode, sexe);
+  if (!epreuves) { console.log('[Rankings] aucune donnée (âge < 12 ans ?) pour ' + age + ' ans'); return null; }
+  const row = epreuves.find(e => normEp(e.epreuve) === normEp(ffnName));
+  if (!row) { console.log('[Rankings] épreuve absente du tableau: ' + ffnName); return null; }
+  if (!row.t16_norm) console.log('[Rankings] effectif < 16 pour ' + ffnName + ' (nbr=' + row.nbr + ')');
+  return row.t16_norm || null;  // null si échantillon insuffisant
 }
 
 function renderResults() {
