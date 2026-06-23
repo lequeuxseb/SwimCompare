@@ -926,6 +926,25 @@ async function get16emeCached(epreuve, bassin, age, sexe) {
   return row.t16_norm || null;  // null si échantillon insuffisant
 }
 
+// Courbe de référence : 16e temps national PAR âge, pour une épreuve fixée.
+// Renvoie un tableau aligné sur `ages`, chaque valeur = 16e temps en SECONDES,
+// ou null si l'âge n'est pas couvert par la FFN (<12 ans) ou effectif < 16.
+// Réutilise getRankings (donc le cache par âge) ; 1 fetch par âge, en parallèle.
+async function courbe16ParAge(epreuve, bassin, sexe, ages) {
+  const bassinCode = bassin.includes('25') ? '25' : '50';
+  const ffnName = ffnEpreuveName(epreuve);
+  if (!ffnName) return ages.map(() => null);
+  const listes = await Promise.all(
+    ages.map(a => getRankings(a, bassinCode, sexe))
+  );
+  return ages.map((a, i) => {
+    const epreuves = listes[i];
+    if (!epreuves) return null;  // âge non couvert (<12) ou pas de données
+    const row = epreuves.find(e => normEp(e.epreuve) === normEp(ffnName));
+    return (row && row.t16_norm) ? toSec(row.t16_norm) : null;  // null si effectif <16
+  });
+}
+
 function renderResults() {
   const tabs    = document.getElementById('res-tabs');
   const content = document.getElementById('res-content');
@@ -1151,23 +1170,26 @@ async function updateProgChart() {
     };
   });
 
-  // Récupérer le 16ème temps national (async)
-  const bassinCode = bas.includes('25') ? '25' : '50';
-  const ref16 = await get16emeCached(ep, bas, ageAnalyse, sexe);
-  const ref16sec = ref16 ? toSec(ref16) : null;
+  // Courbe de référence : 16e temps national PAR âge (FFN, couverte 12→18 ans)
+  const refCurve = await courbe16ParAge(ep, bas, sexe, ages);  // aligné sur `ages`
+  const refHasData = refCurve.some(v => v != null);
+  // 16e temps à l'âge analysé, pour les stats par nageur ci-dessous
+  const idxAnalyse = ages.indexOf(ageAnalyse);
+  const ref16sec = idxAnalyse >= 0 ? refCurve[idxAnalyse] : null;
 
-  // Dataset référence 16ème national (ligne horizontale sur toute la plage)
-  if (ref16sec) {
+  // Dataset courbe de référence (montante avec l'âge ; rupture hors couverture)
+  if (refHasData) {
     datasets.push({
-      label: '16ème national (' + ageAnalyse + ' ans)',
-      data: ages.map(() => ref16sec),  // même valeur sur tous les âges
+      label: '16e national (FFN, 12–18 ans)',
+      data: refCurve,                          // une valeur par âge, null hors 12–18
       borderColor: '#A32D2D',
       backgroundColor: 'transparent',
       borderWidth: 1.5,
       borderDash: [6, 4],
-      pointRadius: 0,
-      tension: 0,
-      spanGaps: true,
+      pointRadius: refCurve.map(v => v ? 3 : 0),
+      pointHoverRadius: 5,
+      tension: 0.35,
+      spanGaps: false,                         // ne relie PAS à travers les âges <12
     });
   }
 
@@ -1253,7 +1275,7 @@ async function updateProgChart() {
             ? (parseFloat(vs16) <= 0
                ? '▼ ' + Math.abs(vs16) + '% sous le 16ème'
                : '▲ ' + vs16 + '% au-dessus du 16ème')
-            : ref16 ? 'pas de temps à ' + ageAnalyse + ' ans' : 'référence indisponible'}
+            : ref16sec ? 'pas de temps à ' + ageAnalyse + ' ans' : 'référence indisponible'}
         </p>
       </div>`;
     }).join('');
