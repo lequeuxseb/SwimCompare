@@ -459,7 +459,7 @@ td:nth-child(2) { color: var(--gray); font-size: .72rem; }
       <div>
         <div class="param-label">Sexe (obligatoire)</div>
         <select id="f-sexe" onchange="onSexeChange()">
-          <option value="" disabled selected>— Choisir —</option>
+          <option value="" selected>— Choisir —</option>
           <option value="M">Masculin</option>
           <option value="F">Féminin</option>
         </select>
@@ -607,23 +607,30 @@ function goTo(n) {
 
 function goToParams() {
   if (!S.swimmers.length) { toast('Ajoutez au moins un nageur', 'err'); return; }
-  if (S.sexe !== 'M' && S.sexe !== 'F') {
+  if (selectedSexe() === '') {
     toast('Choisissez le sexe (Masculin ou Féminin)', 'err'); return;
   }
+  S.sexe = selectedSexe();
   renderRecap();
   goTo(2);
 }
 
+// Sexe actuellement choisi dans le sélecteur ('M' | 'F' | '' si non choisi).
+function selectedSexe() {
+  const el = document.getElementById('f-sexe');
+  const v = el ? el.value : '';
+  return (v === 'M' || v === 'F') ? v : '';
+}
 // Le bouton "Suivant — Paramètres" exige : ≥1 nageur ET un sexe choisi.
 function canProceed() {
-  return S.swimmers.length > 0 && (S.sexe === 'M' || S.sexe === 'F');
+  return S.swimmers.length > 0 && selectedSexe() !== '';
 }
 function updateNextBtn() {
   const btn = document.getElementById('btn-to-params');
   if (btn) btn.disabled = !canProceed();
 }
 function onSexeChange() {
-  S.sexe = document.getElementById('f-sexe').value;
+  S.sexe = selectedSexe();
   updateNextBtn();
 }
 
