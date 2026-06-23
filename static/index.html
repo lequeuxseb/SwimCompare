@@ -457,9 +457,9 @@ td:nth-child(2) { color: var(--gray); font-size: .72rem; }
                placeholder="ex: 2014" maxlength="4">
       </div>
       <div>
-        <div class="param-label">Sexe</div>
-        <select id="f-sexe">
-          <option value="">Tous</option>
+        <div class="param-label">Sexe (obligatoire)</div>
+        <select id="f-sexe" onchange="onSexeChange()">
+          <option value="" disabled selected>— Choisir —</option>
           <option value="M">Masculin</option>
           <option value="F">Féminin</option>
         </select>
@@ -585,6 +585,7 @@ td:nth-child(2) { color: var(--gray); font-size: .72rem; }
 // ── État ────────────────────────────────────────────────────────────────────
 const S = {
   swimmers: [],   // [{ id, label, annee, sexe }]
+  sexe:     '',   // sexe du cohort à comparer : 'M' ou 'F' (obligatoire)
   bassin:   '25',
   age:      12,
   results:  [],   // [{ nom, annee, perfs:[...] }]
@@ -606,8 +607,24 @@ function goTo(n) {
 
 function goToParams() {
   if (!S.swimmers.length) { toast('Ajoutez au moins un nageur', 'err'); return; }
+  if (S.sexe !== 'M' && S.sexe !== 'F') {
+    toast('Choisissez le sexe (Masculin ou Féminin)', 'err'); return;
+  }
   renderRecap();
   goTo(2);
+}
+
+// Le bouton "Suivant — Paramètres" exige : ≥1 nageur ET un sexe choisi.
+function canProceed() {
+  return S.swimmers.length > 0 && (S.sexe === 'M' || S.sexe === 'F');
+}
+function updateNextBtn() {
+  const btn = document.getElementById('btn-to-params');
+  if (btn) btn.disabled = !canProceed();
+}
+function onSexeChange() {
+  S.sexe = document.getElementById('f-sexe').value;
+  updateNextBtn();
 }
 
 // ── Recherche ────────────────────────────────────────────────────────────────
@@ -714,7 +731,7 @@ function renderChips() {
   const list  = document.getElementById('chip-list');
   const count = document.getElementById('chip-count');
   count.textContent = S.swimmers.length;
-  document.getElementById('btn-to-params').disabled = !S.swimmers.length;
+  updateNextBtn();
 
   if (!S.swimmers.length) {
     list.innerHTML = '<div class="empty-msg">Ajoutez au moins 1 nageur</div>';
@@ -1131,7 +1148,7 @@ async function updateProgChart() {
 
   // Construire les données par nageur : age → meilleur temps
   const nageurs = S.results.map(r => r.nom);
-  const sexe    = S.results[0] ? (S.results[0].sexe || 'M') : 'M';
+  const sexe    = S.sexe || (S.results[0] && S.results[0].sexe) || 'M';
 
   // Collecter tous les âges disponibles pour cette épreuve (depuis allPerfs)
   const agesSet = new Set();
@@ -1180,7 +1197,7 @@ async function updateProgChart() {
   // Dataset courbe de référence (montante avec l'âge ; rupture hors couverture)
   if (refHasData) {
     datasets.push({
-      label: '16e national (FFN, 12–18 ans)',
+      label: '16e national ' + (sexe === 'F' ? 'filles' : 'garçons') + ' (FFN, 12–18 ans)',
       data: refCurve,                          // une valeur par âge, null hors 12–18
       borderColor: '#A32D2D',
       backgroundColor: 'transparent',
