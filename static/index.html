@@ -1059,6 +1059,43 @@ function renderResults() {
     </p>`;
   content.appendChild(progPanel);
 
+  // ── Onglet Bilan de saison ──
+  addTab('🏁 Bilan saison', 'panel-bilan', false);
+  const bilanPanel = document.createElement('div');
+  bilanPanel.className = 'res-panel';
+  bilanPanel.id = 'panel-bilan';
+  const seasons = bilanSeasons();
+  bilanPanel.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;margin-bottom:14px">
+      <div>
+        <div style="font-size:.72rem;color:var(--gray);margin-bottom:4px">Saison</div>
+        <select id="bilan-saison" style="font-size:.82rem" onchange="updateBilan()">
+          ${seasons.map(s => `<option value="${s}">${seasonLabel(s)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <div style="font-size:.72rem;color:var(--gray);margin-bottom:4px">Nageur (détail)</div>
+        <select id="bilan-nageur" style="font-size:.82rem" onchange="updateBilan()">
+          ${S.results.map((r, i) => `<option value="${i}">${r.nom}</option>`).join('')}
+        </select>
+      </div>
+      <button class="btn btn-cyan" style="font-size:.78rem;padding:8px 12px" onclick="printBilan()">⬇︎ Exporter (PDF)</button>
+    </div>
+    <div style="font-size:.74rem;color:var(--gray);margin-bottom:6px">Vue groupe</div>
+    <div id="bilan-group"></div>
+    <div style="font-size:.74rem;color:var(--gray);margin:16px 0 6px">Détail nageur</div>
+    <div id="bilan-detail"></div>
+    <p style="font-size:.7rem;color:var(--gray);margin-top:10px;text-align:center">
+      RP = record personnel battu cette saison · données ffn.extranat.fr (FFN), SwimCompare non affilié
+    </p>`;
+  content.appendChild(bilanPanel);
+  if (seasons.length) {
+    updateBilan();
+  } else {
+    bilanPanel.querySelector('#bilan-detail').innerHTML =
+      '<p style="color:var(--gray);font-size:.8rem;text-align:center;padding:16px">Aucune date exploitable dans les performances chargées.</p>';
+  }
+
   // ── Un onglet par nageur ──
   S.results.forEach((r, idx) => {
     const id = 'panel-sw-' + idx;
@@ -1128,8 +1165,203 @@ function addTab(label, panelId, active) {
     t.classList.add('on');
     document.getElementById(panelId).classList.add('on');
     if (panelId === 'panel-progression') initProgChart();
+    if (panelId === 'panel-bilan') updateBilan();
   });
   tabs.appendChild(t);
+}
+
+
+// ── Bilan de saison ───────────────────────────────────────────────────────────
+// Tout est calculé à la volée depuis allPerfs déjà chargé : rien n'est stocké.
+const RP_CHIP  = 'background:#10B981;color:#fff;border-radius:6px;padding:1px 6px;font-size:.66rem;font-weight:600';
+const NEW_CHIP = 'background:#EF9F27;color:#fff;border-radius:6px;padding:1px 6px;font-size:.66rem;font-weight:600';
+
+function perfSeasonEnd(dateStr) {
+  // 'jj/mm/aaaa' -> année de fin de saison sportive FFN (sept->août)
+  const m = (dateStr || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  const mois = parseInt(m[2]), an = parseInt(m[3]);
+  return mois >= 9 ? an + 1 : an;
+}
+function dateVal(dateStr) {
+  const m = (dateStr || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return 0;
+  return parseInt(m[3]) * 10000 + parseInt(m[2]) * 100 + parseInt(m[1]);
+}
+function seasonLabel(end) { return (end - 1) + '–' + end; }
+
+function bilanSeasons() {
+  const set = new Set();
+  S.results.forEach(r => (r.allPerfs || r.perfs).forEach(p => {
+    const s = perfSeasonEnd(p.date);
+    if (s) set.add(s);
+  }));
+  return [...set].sort((a, b) => b - a);  // plus récente d'abord
+}
+
+// Bilan d'un nageur pour une saison : entête + lignes par épreuve||bassin
+function bilanNageur(r, season) {
+  const src = (r.allPerfs || r.perfs);
+  const inSeason = src.filter(p => perfSeasonEnd(p.date) === season);
+  const groups = {};
+  inSeason.forEach(p => {
+    const k = p.epreuve + '||' + p.bassin;
+    (groups[k] = groups[k] || []).push(p);
+  });
+  const rows = Object.entries(groups).map(([k, perfs]) => {
+    const [ep, bas] = k.split('||');
+    const bestPerf  = perfs.reduce((a, p) => toSec(p.temps) < toSec(a.temps) ? p : a);
+    const firstPerf = perfs.reduce((a, p) => dateVal(p.date) < dateVal(a.date) ? p : a);
+    const bestSec = toSec(bestPerf.temps), firstSec = toSec(firstPerf.temps);
+    const gain = firstSec - bestSec;                    // >=0 : amélioration sur la saison
+    const pct  = firstSec ? (gain / firstSec * 100) : 0;
+    // record perso vs saisons antérieures, sur la MÊME épreuve+bassin
+    const prior = src.filter(p => {
+      if (p.epreuve !== ep || p.bassin !== bas) return false;
+      const s = perfSeasonEnd(p.date);
+      return s && s < season;
+    });
+    const priorBest = prior.length ? Math.min(...prior.map(p => toSec(p.temps))) : null;
+    let rp = 'first';                                   // 1re saison sur l'épreuve
+    if (priorBest !== null) rp = (bestSec < priorBest - 0.001) ? 'rp' : 'no';
+    return { ep, bas, races: perfs.length, bestPerf, gain, pct, rp,
+             points: parseInt(bestPerf.points) || 0 };
+  }).sort((a, b) => a.ep.localeCompare(b.ep) || a.bas.localeCompare(b.bas));
+
+  return {
+    rows,
+    courses: inSeason.length,
+    nbEp: rows.length,
+    nbRP: rows.filter(x => x.rp === 'rp').length,
+    bestPts: rows.reduce((a, x) => Math.max(a, x.points), 0),
+  };
+}
+
+function updateBilan() {
+  const sSel = document.getElementById('bilan-saison');
+  const nSel = document.getElementById('bilan-nageur');
+  if (!sSel || !nSel || !sSel.value) return;
+  const season = parseInt(sSel.value);
+
+  // Vue groupe : une ligne par nageur
+  const groupEl = document.getElementById('bilan-group');
+  if (groupEl) {
+    groupEl.innerHTML = `
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr>
+            <th>Nageur</th><th>Courses</th><th>Épreuves</th><th>RP</th><th>Meil. cote</th>
+          </tr></thead>
+          <tbody>
+            ${S.results.map(r => {
+              const b = bilanNageur(r, season);
+              return `<tr>
+                <td>${r.nom}</td>
+                <td>${b.courses}</td>
+                <td>${b.nbEp}</td>
+                <td>${b.nbRP ? `<span style="${RP_CHIP}">${b.nbRP}</span>` : '0'}</td>
+                <td style="color:var(--gray)">${b.bestPts || '—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  }
+
+  // Détail du nageur sélectionné
+  const r = S.results[parseInt(nSel.value)];
+  const b = bilanNageur(r, season);
+  const detail = document.getElementById('bilan-detail');
+  if (!detail) return;
+  if (!b.rows.length) {
+    detail.innerHTML = `<p style="color:var(--gray);font-size:.8rem;text-align:center;padding:16px">
+      Aucune course pour ${r.nom} sur la saison ${seasonLabel(season)}.</p>`;
+    return;
+  }
+  detail.innerHTML = `
+    <div class="perf-header">
+      <div class="perf-avatar">${initials(r.nom)}</div>
+      <div>
+        <div class="perf-name">${r.nom}</div>
+        <div class="perf-meta">Saison ${seasonLabel(season)} · né(e) ${r.annee || '?'}</div>
+      </div>
+    </div>
+    <div class="perf-stats">
+      <div class="stat-box"><div class="stat-val">${b.courses}</div><div class="stat-lbl">Courses</div></div>
+      <div class="stat-box"><div class="stat-val">${b.nbEp}</div><div class="stat-lbl">Épreuves</div></div>
+      <div class="stat-box"><div class="stat-val">${b.nbRP}</div><div class="stat-lbl">Records perso</div></div>
+      <div class="stat-box"><div class="stat-val">${b.bestPts || '—'}</div><div class="stat-lbl">Meil. cote</div></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>Épreuve</th><th>Bassin</th><th>Meilleur</th><th>Courses</th>
+          <th>Progression</th><th>Compétition</th><th>Date</th>
+        </tr></thead>
+        <tbody>
+          ${b.rows.map(x => {
+            const prog = (x.races > 1 && x.gain > 0.001)
+              ? `<span style="color:#10B981">−${x.gain.toFixed(2)}s (${x.pct.toFixed(1)}%)</span>`
+              : '<span style="color:var(--gray)">—</span>';
+            const tag = x.rp === 'rp'
+              ? ` <span style="${RP_CHIP}" title="Record personnel battu cette saison">RP</span>`
+              : (x.rp === 'first'
+                  ? ` <span style="${NEW_CHIP}" title="1re saison sur l'épreuve">nouv.</span>` : '');
+            return `<tr>
+              <td>${x.ep}${tag}</td>
+              <td>${x.bas}</td>
+              <td><span class="t-best">${x.bestPerf.temps}</span></td>
+              <td>${x.races}</td>
+              <td style="font-size:.74rem">${prog}</td>
+              <td style="font-size:.72rem">${x.bestPerf.lieu || '—'}</td>
+              <td style="font-size:.72rem;color:var(--gray)">${x.bestPerf.date || '—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// Export PDF via l'impression du navigateur (page autonome dans un nouvel onglet)
+function printBilan() {
+  const sSel = document.getElementById('bilan-saison');
+  const nSel = document.getElementById('bilan-nageur');
+  if (!sSel || !nSel || !sSel.value) return;
+  const season = parseInt(sSel.value);
+  const r = S.results[parseInt(nSel.value)];
+  const b = bilanNageur(r, season);
+  const esc = s => (s || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+  const rowsHtml = b.rows.map(x => {
+    const prog = (x.races > 1 && x.gain > 0.001)
+      ? `−${x.gain.toFixed(2)}s (${x.pct.toFixed(1)}%)` : '—';
+    const tag = x.rp === 'rp' ? ' (RP)' : (x.rp === 'first' ? ' (nouv.)' : '');
+    return `<tr><td>${esc(x.ep)}${tag}</td><td>${esc(x.bas)}</td>
+      <td><b>${esc(x.bestPerf.temps)}</b></td><td style="text-align:center">${x.races}</td>
+      <td>${prog}</td><td>${esc(x.bestPerf.lieu)||'—'}</td><td>${esc(x.bestPerf.date)||'—'}</td></tr>`;
+  }).join('');
+  const html = `<!doctype html><html lang="fr"><head><meta charset="utf-8">
+    <title>Bilan ${esc(r.nom)} — ${seasonLabel(season)}</title>
+    <style>
+      body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;margin:28px;font-size:13px}
+      h1{font-size:18px;margin:0 0 2px} h2{font-size:13px;font-weight:normal;color:#555;margin:0 0 14px}
+      table{border-collapse:collapse;width:100%;margin-top:8px}
+      th,td{border:1px solid #ccc;padding:6px 8px;text-align:left}
+      th{background:#f0f3f7;font-size:12px} .stats{margin:8px 0;font-size:13px}
+      .foot{margin-top:20px;font-size:10px;color:#888}
+    </style></head><body>
+    <h1>Bilan de saison — ${esc(r.nom)}</h1>
+    <h2>Saison ${seasonLabel(season)} · né(e) ${esc(r.annee)||'?'}</h2>
+    <div class="stats">${b.courses} courses · ${b.nbEp} épreuves · ${b.nbRP} record(s) personnel(s) · meilleure cote ${b.bestPts||'—'}</div>
+    <table><thead><tr><th>Épreuve</th><th>Bassin</th><th>Meilleur</th><th>Courses</th><th>Progression</th><th>Compétition</th><th>Date</th></tr></thead>
+    <tbody>${rowsHtml}</tbody></table>
+    <p class="foot">Données : ffn.extranat.fr (FFN). SwimCompare n'est pas affilié à la FFN. Bilan généré le ${new Date().toLocaleDateString('fr-FR')}.</p>
+    </body></html>`;
+  const w = window.open('', '_blank');
+  if (!w) { toast('Autorise les pop-ups pour exporter le bilan', 'err'); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch (e) {} }, 350);
 }
 
 
